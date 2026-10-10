@@ -6,7 +6,7 @@ import {
     Cigarette, Flame, Briefcase, Pocket, Baby, Store, ShoppingBasket, ShoppingCart,
     Apple, Carrot, Fish, Beef, Milk, Croissant, Pizza, Candy, IceCream, Cookie, CupSoda,
     Wine, Beer, Martini, Brush, Wand2, Droplet, Smartphone, Laptop, Monitor, Plug, Tv,
-    Stethoscope, Pill, Syringe, Cross, Wrench, Hammer, Sofa, Bed, Bath, Car, Bike, Tent, Ticket, Palmtree, Utensils,
+    Stethoscope, Pill, Syringe, Cross, Wrench, Hammer, Sofa, Bed, Bath, Car, Bike, Tent, Ticket, Palmtree, Utensils, Table,
     SprayCan, Snowflake, ThermometerSnowflake, ThermometerSun, Drill, PenTool, GlassWater, User, Users,
     type LucideIcon
 } from "lucide-react";
@@ -26,7 +26,7 @@ export const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
     // Santé, pharmacie
     Stethoscope, Pill, Syringe, Cross,
     // Quincaillerie, meubles, véhicules divers
-    Wrench, Hammer, Sofa, Bed, Bath, Car, Bike, Tent, Ticket, Palmtree, Drill, PenTool,
+    Wrench, Hammer, Sofa, Bed, Bath, Car, Bike, Tent, Ticket, Palmtree, Drill, PenTool, Table,
     // Tabac, divers
     Cigarette, Flame, Sun, Moon, Zap, Gift, Snowflake, ThermometerSnowflake, ThermometerSun
 };

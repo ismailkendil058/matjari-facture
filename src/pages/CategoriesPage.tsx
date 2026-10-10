@@ -374,7 +374,7 @@ export default function CategoriesPage() {
                             <Input
                                 value={form.key}
                                 onChange={e => setForm(prev => ({ ...prev, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "") }))}
-                                placeholder="ex: chaussures"
+                                placeholder="ex: salon"
                                 className="h-14 border-gray-200 rounded-xl font-bold text-lg px-5 font-mono"
                             />
                         </div>

@@ -18,6 +18,27 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/components/AuthContext";
 import { CATEGORY_ICON_MAP } from "@/lib/icons";
 
+// These files are bundled with the application so invoices do not depend on
+// an external QR-code service or an internet connection while printing.
+const INVOICE_QR_CODES = {
+  instagram: "/qr-instagram.png",
+  viber: "/qr-viber.png",
+  location: "/qr-location.png",
+} as const;
+
+const DEFAULT_INVOICE_NOTE = "Conditions de retour :\nRetours acceptés sous 3 jours avec cette facture.\nالاسترجاع مقبول خلال 3 أيام";
+
+const formatInvoiceNoteForPrint = (note: string) => {
+  const trimmedNote = note.trim();
+  if (!trimmedNote) return "Aucune condition particulière.";
+
+  return trimmedNote
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r?\n/g, "<br>");
+};
+
 // Icon registry for resolving icon names to components
 const LUCIDE_ICON_MAP = CATEGORY_ICON_MAP;
 
@@ -88,6 +109,12 @@ export default function CaissePage() {
   const [sizeModalProduct, setSizeModalProduct] = useState<Product | null>(null);
   const sizeModalOpenTimeRef = useRef<number>(0);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [editingClientInModal, setEditingClientInModal] = useState(false);
+  const [tempClientName, setTempClientName] = useState("");
+  const [invoicePaymentMethod, setInvoicePaymentMethod] = useState<'cash' | 'cheque'>('cash');
+  const [editingPaymentInModal, setEditingPaymentInModal] = useState(false);
+  const [invoiceNote, setInvoiceNote] = useState(DEFAULT_INVOICE_NOTE);
+  const [editingInvoiceNote, setEditingInvoiceNote] = useState(false);
 
   const [showRetour, setShowRetour] = useState(false);
   const [currentSaleId, setCurrentSaleId] = useState("");
@@ -710,6 +737,8 @@ export default function CaissePage() {
   const openCheckout = async () => {
     const nextId = await getNextTicketId();
     setCurrentSaleId(nextId);
+    setInvoiceNote(DEFAULT_INVOICE_NOTE);
+    setEditingInvoiceNote(false);
     setShowCheckout(true);
   };
 
@@ -911,101 +940,263 @@ export default function CaissePage() {
 
   const executePrint = () => {
     const saleId = currentSaleId || generateId().toUpperCase();
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
 
-    const itemsHtml = cart.map(item => `
-      <tr style="border-bottom: 1px solid #eee;">
-        <td style="padding: 4px 0;">${item.product.name} ${item.size ? `(${item.size})` : ''}</td>
-        <td style="padding: 4px 0; text-align: center;">${item.quantity}</td>
-        <td style="padding: 4px 0; text-align: right;">${formatDZD(item.subtotal)}</td>
+    const isCredit = showCreditDetails;
+    const paidAmount = isCredit ? (Number(paidNow) || 0) : total;
+    const creditAmount = isCredit ? Math.max(0, total - paidAmount) : 0;
+    const invoiceDate = new Date().toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
+    const invoiceDateTime = new Date().toLocaleString('fr-FR');
+
+    const itemsHtml = cart.map((item, idx) => {
+      const unitPrice = item.customUnitPrice ?? item.product.priceSale;
+      return `
+      <tr>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px;">
+          <div style="font-weight: 600; color: #1a1a2e;">${item.product.name}${item.size ? ` <span style="color:#6366f1;font-size:11px;">(${item.size})</span>` : ''}</div>
+          ${item.product.nameAr ? `<div style="font-size: 11px; color: #888; direction: rtl;">${item.product.nameAr}</div>` : ''}
+        </td>
+        <td style="padding: 10px 8px; text-align: center; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #555;">${item.weightKg ?? item.quantity}</td>
+        <td style="padding: 10px 8px; text-align: right; border-bottom: 1px solid #f0f0f0; font-size: 13px;">${formatDZD(unitPrice)}</td>
+        <td style="padding: 10px 8px; text-align: right; border-bottom: 1px solid #f0f0f0; font-size: 13px; font-weight: 700; color: #1a1a2e;">${formatDZD(item.subtotal)}</td>
+      </tr>`;}).join('');
+
+    const invoiceContent = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Facture ${saleId} - BK MODE</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+    @page { size: A4; margin: 15mm 20mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; color: #1a1a2e; background: #fff; font-size: 13px; }
+    .invoice-wrapper { max-width: 750px; margin: 0 auto; }
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 24px; border-bottom: 3px solid #1a1a2e; margin-bottom: 32px; }
+    .brand-block { }
+    .brand-name { font-size: 36px; font-weight: 900; letter-spacing: -1px; color: #1a1a2e; line-height: 1; }
+    .brand-tagline { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #888; margin-top: 4px; }
+    .brand-contact { font-size: 11px; color: #666; margin-top: 10px; line-height: 1.7; }
+    .invoice-title-block { text-align: right; }
+    .invoice-label { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #888; }
+    .invoice-number { font-size: 28px; font-weight: 900; color: #6366f1; margin-top: 4px; letter-spacing: -0.5px; }
+    .invoice-date { font-size: 12px; color: #666; margin-top: 6px; }
+    /* Meta row */
+    .meta-row { display: flex; gap: 24px; margin-bottom: 32px; }
+    .meta-box { flex: 1; background: #f8f8ff; border-radius: 12px; padding: 16px 20px; border: 1px solid #e8e8f0; }
+    .meta-box-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #888; font-weight: 700; margin-bottom: 8px; }
+    .meta-box-value { font-size: 13px; font-weight: 600; color: #1a1a2e; line-height: 1.6; }
+    .meta-box-value span { color: #6366f1; }
+    /* Items table */
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    .items-table thead tr { background: #1a1a2e; }
+    .items-table thead th { padding: 12px 8px; text-align: left; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: white; font-weight: 700; }
+    .items-table thead th:last-child { text-align: right; }
+    .items-table thead th:nth-child(2), .items-table thead th:nth-child(3) { text-align: center; }
+    .items-table thead th:nth-child(3) { text-align: right; }
+    .items-table tbody tr:nth-child(even) { background: #fafafa; }
+    /* Totals */
+    .totals-section { display: flex; justify-content: flex-end; margin-bottom: 32px; }
+    .totals-box { width: 280px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 7px 0; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+    .totals-row.total { border-bottom: none; border-top: 2px solid #1a1a2e; margin-top: 8px; padding-top: 12px; }
+    .totals-row.total .label { font-size: 15px; font-weight: 900; }
+    .totals-row.total .value { font-size: 22px; font-weight: 900; color: #6366f1; }
+    .totals-row .label { color: #666; font-weight: 500; }
+    .totals-row .value { font-weight: 700; color: #1a1a2e; }
+    .totals-row.reduction .value { color: #ef4444; }
+    /* Payment info */
+    .payment-section { background: linear-gradient(135deg, #f0f0ff, #e8e8ff); border-radius: 12px; padding: 20px 24px; margin-bottom: 32px; border: 1px solid #c7d2fe; }
+    .payment-title { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #6366f1; font-weight: 800; margin-bottom: 14px; }
+    .payment-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+    .payment-row .label { color: #555; font-weight: 500; }
+    .payment-row .value { font-weight: 700; }
+    .payment-row.credit-row { border-top: 1px dashed #a5b4fc; padding-top: 10px; margin-top: 4px; }
+    .payment-row.credit-row .value { color: #dc2626; font-size: 16px; font-weight: 900; }
+    /* Divider */
+    .divider { height: 1px; background: #e8e8f0; margin: 24px 0; }
+    /* Footer */
+    .footer { display: flex; justify-content: space-between; align-items: flex-end; }
+    .footer-terms { font-size: 11px; color: #888; line-height: 1.8; max-width: 320px; }
+    .footer-terms strong { color: #555; }
+    .footer-arabic { font-size: 12px; color: #888; direction: rtl; text-align: right; }
+    .footer-stamp { text-align: right; }
+    .footer-stamp-box { border: 2px dashed #ddd; border-radius: 10px; padding: 16px 24px; font-size: 11px; color: #ccc; text-align: center; min-width: 140px; }
+    .badge { display: inline-block; background: ${isCredit ? '#fef3c7' : '#d1fae5'}; color: ${isCredit ? '#92400e' : '#065f46'}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; margin-top: 6px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+<div class="invoice-wrapper">
+  <!-- Header -->
+  <div class="header">
+    <div class="brand-block">
+      <div class="brand-name">LUXEDOR_</div>
+      <div class="brand-tagline">Meubles &amp; Déco</div>
+      <div class="brand-contact">
+        Tél: 0549 10 64 78<br>
+        Adresse: OuledHeddaj, Boumerdes
+      </div>
+    </div>
+    <div class="invoice-title-block">
+      <div class="invoice-label">Facture de vente</div>
+      <div class="invoice-number">#${saleId.toUpperCase()}</div>
+      <div class="invoice-date">${invoiceDate}</div>
+      <div class="invoice-date">Caissier: <strong>${user?.username || 'Admin'}</strong></div>
+      <div><span class="badge">${isCredit ? 'CRÉDIT' : 'VENTE DIRECTE'}</span></div>
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div class="meta-row">
+    <div class="meta-box">
+      <div class="meta-box-title">Vendu par</div>
+      <div class="meta-box-value">
+        LUXEDOR_<br>
+        <span>${invoiceDateTime}</span>
+      </div>
+    </div>
+    ${clientName ? `<div class="meta-box">
+      <div class="meta-box-title">Client</div>
+      <div class="meta-box-value">
+        <strong>${clientName}</strong>${clientPhone ? `<br>${clientPhone}` : ''}
+      </div>
+    </div>` : '<div class="meta-box"><div class="meta-box-title">Client</div><div class="meta-box-value" style="color:#bbb;">Client de passage</div></div>'}
+    <div class="meta-box">
+      <div class="meta-box-title">Paiement</div>
+      <div class="meta-box-value">
+        ${isCredit ? `Crédit client<br><span>Versé: ${formatDZD(paidAmount)}</span>` : (invoicePaymentMethod === 'cheque' ? 'Paiement par Chèque' : 'Paiement Cash')}
+      </div>
+    </div>
+  </div>
+
+  <!-- Items table -->
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th style="width:45%; border-radius:8px 0 0 0;">Désignation</th>
+        <th style="width:15%; text-align:center;">Qté</th>
+        <th style="width:20%; text-align:right;">Prix Unit.</th>
+        <th style="width:20%; text-align:right; border-radius:0 8px 0 0;">Total</th>
       </tr>
-    `).join('');
+    </thead>
+    <tbody>
+      ${itemsHtml}
+    </tbody>
+  </table>
 
-    const receiptContent = `
-      <html>
-      <head>
-        <title>Ticket d'achat - Matjari</title>
-        <style>
-          @page { size: 80mm auto; margin: 0; }
-          body { font-family: 'Courier New', Courier, monospace; width: 75mm; margin: 0 auto; padding: 10px; color: black; background: white; }
-          .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          .bold { font-weight: bold; }
-          .hr { border-bottom: 1px dashed black; margin: 10px 0; }
-          table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-          th { font-size: 11px; text-transform: uppercase; border-bottom: 1px solid black; }
-          td { font-size: 12px; }
-          .total-box { margin-top: 15px; border-top: 2px solid black; padding-top: 5px; }
-          .footer { font-size: 10px; margin-top: 20px; text-align: center; font-style: italic; }
-        </style>
-      </head>
-      <body>
-        <div class="text-center">
-          <div class="bold" style="font-size: 22px;">BK MODE</div>
-          <div style="font-size: 12px; margin-top: 4px;">TICKET D'ACHAT</div>
-        </div>
-        <div class="hr"></div>
-        <div style="font-size: 10px;">
-          Date: ${new Date().toLocaleString('fr-FR')} <br/>
-          Ticket ID: ${saleId.toUpperCase()} <br/>
-          Caissier: ${user?.username || 'Admin'}
-        </div>
-        ${clientName ? `<div style="font-size: 10px; margin-top: 4px;">Client: <b>${clientName}</b></div>` : ''}
-        <div class="hr"></div>
-        <table>
-          <thead>
-            <tr>
-              <th style="text-align: left;">Art.</th>
-              <th style="text-align: center;">Qté</th>
-              <th style="text-align: right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
-        <div class="hr"></div>
-        <div class="text-right" style="font-size: 11px;">
-          Sous-total: ${formatDZD(subtotal)} <br/>
-          ${reduction > 0 ? `Réduction: -${formatDZD(reduction)} <br/>` : ''}
-        </div>
-        <div class="total-box">
-          <div class="flex justify-between" style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 2000;">
-            <span class="bold">TOTAL:</span>
-            <span class="bold">${formatDZD(total)}</span>
-          </div>
-          ${showCreditDetails && Number(paidNow) > 0 ? `
-            <div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;">
-              <span>Payé:</span>
-              <span>${formatDZD(Number(paidNow))}</span>
-            </div>
-          ` : ''}
-          ${showCreditDetails ? `
-            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-top: 2px; border-top: 1px solid #ddd;">
-              <span class="bold">RESTE (CRÉDIT):</span>
-              <span class="bold">${formatDZD(Math.max(0, total - (Number(paidNow) || 0)))}</span>
-            </div>
-          ` : ''}
-        </div>
-        <div class="footer">
-          <div style="font-weight: bold; font-size: 11px; margin-bottom: 2px;">Les retours et échanges sont acceptés sous 3 jours</div>
-          <div style="font-weight: bold; font-size: 12px; margin-bottom: 6px; direction: rtl;">الاسترجاع والاستبدال مقبول خلال 3 أيام</div>
-          <div style="margin-top: 6px;">Merci pour votre confiance !</div>
-        </div>
-        <script>
-          setTimeout(() => {
-            window.print();
-            window.close();
-          }, 500);
-        </script>
-      </body>
-      </html>
-    `;
+  <!-- Totals -->
+  <div class="totals-section">
+    <div class="totals-box">
+      <div class="totals-row">
+        <span class="label">Sous-total</span>
+        <span class="value">${formatDZD(subtotal)}</span>
+      </div>
+      ${reduction > 0 ? `<div class="totals-row reduction"><span class="label">Remise</span><span class="value">- ${formatDZD(reduction)}</span></div>` : ''}
+      <div class="totals-row total">
+        <span class="label">Total TTC</span>
+        <span class="value">${formatDZD(total)}</span>
+      </div>
+    </div>
+  </div>
 
-    printWindow.document.write(receiptContent);
-    printWindow.document.close();
-    setShowReceiptModal(false);
+  ${isCredit ? `
+  <!-- Payment info -->
+  <div class="payment-section">
+    <div class="payment-title">Détail du paiement crédit</div>
+    <div class="payment-row"><span class="label">Montant total</span><span class="value">${formatDZD(total)}</span></div>
+    <div class="payment-row"><span class="label">Versement initial</span><span class="value">${formatDZD(paidAmount)}</span></div>
+    <div class="payment-row credit-row"><span class="label">Montant restant (crédit)</span><span class="value">${formatDZD(creditAmount)}</span></div>
+  </div>` : ''}
+
+  <div class="divider"></div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-terms">
+      <strong>Note / Conditions :</strong><br>
+      ${formatInvoiceNoteForPrint(invoiceNote)}
+      <br>
+      <em style="font-size:10px;">Merci pour votre confiance — LUXEDOR_</em>
+    </div>
+    <div class="footer-stamp">
+      <div class="footer-stamp-box">
+        Cachet &amp; Signature
+        <br><br><br><br>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider" style="margin: 16px 0 12px;"></div>
+
+  <!-- QR Codes at very bottom of document -->
+  <div style="display: flex; justify-content: center; gap: 24px; align-items: center; padding-top: 6px;">
+    <!-- Instagram QR -->
+    <div style="text-align: center; background: #fafafa; border: 1px solid #eee; padding: 10px 16px; border-radius: 12px;">
+      <img src="${INVOICE_QR_CODES.instagram}" alt="Instagram QR" style="width:110px; height:110px; display:block; margin:0 auto 6px;" />
+      <div style="font-size:11px; font-weight:800; color:#d62976; display:flex; items-center; justify-content:center; gap:3px;">
+        <svg style="width:13px;height:13px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+        @luxedor_
+      </div>
+    </div>
+
+    <!-- Viber QR -->
+    <div style="text-align: center; background: #fafafa; border: 1px solid #eee; padding: 10px 16px; border-radius: 12px;">
+      <img src="${INVOICE_QR_CODES.viber}" alt="Viber QR" style="width:110px; height:110px; display:block; margin:0 auto 6px;" />
+      <div style="font-size:11px; font-weight:800; color:#7360f2; display:flex; items-center; justify-center; gap:3px;">
+        <svg style="width:13px;height:13px;fill:currentColor;" viewBox="0 0 24 24"><path d="M11.393 0C5.076 0 .004 4.675.004 10.5c0 3.194 1.543 6.044 3.978 7.979v4.208l4.084-2.25c1.077.3 2.22.463 3.327.463 6.317 0 11.393-4.675 11.393-10.5S17.71 0 11.393 0zm4.27 14.544c-.287.458-.87.728-1.54.728-2.613 0-5.321-2.457-6.264-5.352-.164-.505.045-1.076.471-1.353.48-.313 1.133-.186 1.46.287.354.512.784 1.056.963 1.344.153.245.141.564-.031.796-.135.183-.342.434-.486.602-.07.082-.08.2-.023.292.484.773 1.488 1.83 2.302 2.277.097.054.215.04.295-.034.174-.162.437-.417.618-.553.237-.178.56-.176.799-.016.29.195.845.626 1.356.985.474.333.593.993.28 1.462z"/></svg>
+        Viber
+      </div>
+    </div>
+
+    <!-- Maps QR -->
+    <div style="text-align: center; background: #fafafa; border: 1px solid #eee; padding: 10px 16px; border-radius: 12px;">
+      <img src="${INVOICE_QR_CODES.location}" alt="Maps QR" style="width:110px; height:110px; display:block; margin:0 auto 6px;" />
+      <div style="font-size:11px; font-weight:800; color:#ea4335; display:flex; items-center; justify-center; gap:3px;">
+        <svg style="width:13px;height:13px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8zm0 11c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/></svg>
+        Localisation
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
+
+    // Create or reuse hidden print iframe
+    let printFrame = document.getElementById('a4-print-frame') as HTMLIFrameElement | null;
+    if (!printFrame) {
+      printFrame = document.createElement('iframe');
+      printFrame.id = 'a4-print-frame';
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = '0';
+      document.body.appendChild(printFrame);
+    }
+
+    const frameDoc = printFrame.contentWindow?.document || printFrame.contentDocument;
+    if (!frameDoc) {
+      window.print();
+      setShowReceiptModal(false);
+      return;
+    }
+
+    frameDoc.open();
+    frameDoc.write(invoiceContent);
+    frameDoc.close();
+
+    setTimeout(() => {
+      try {
+        printFrame?.contentWindow?.focus();
+        printFrame?.contentWindow?.print();
+      } catch (e) {
+        console.error("Frame print failed:", e);
+        window.print();
+      }
+      setShowReceiptModal(false);
+    }, 300);
   };
 
   const handleClientInput = (val: string) => {
@@ -1083,40 +1274,62 @@ export default function CaissePage() {
           />
         </div>
 
-        {/* Category filters - mobile */}
-        <div className="mobile-scroll-x flex gap-2 overflow-x-auto pb-3 lg:hidden w-full">
-          <div className="flex w-full gap-2">
-            {dynamicCATEGORIES.map(cat => {
-              const catData = dbCategories.find(c => c.key === cat.key);
-              return (
-                <button
-                  key={cat.key}
-                  onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
-                  className={`flex-1 min-w-[72px] aspect-square rounded-2xl transition-all flex flex-col items-center justify-center p-1 shadow-sm border border-transparent text-white ${activeCategory === cat.key ? 'ring-4 ring-primary scale-[0.98]' : 'hover:-translate-y-0.5'}`}
-                  style={{ backgroundColor: catData?.color || '#9DC6D8' }}
-                >
-                  <div className="font-black text-xs md:text-sm tracking-wider text-center leading-tight line-clamp-1">{cat.labelAr}</div>
-                  <span className="font-bold text-[8px] md:text-[9px] opacity-75 tracking-widest text-center uppercase mx-auto line-clamp-1">{cat.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {/* Category filters */}
+        <div className="w-full overflow-x-auto pb-4 pt-2 flex justify-center scrollbar-thin">
+          <div className="flex gap-3 px-1 min-w-max mx-auto justify-center">
+            {/* All Category Button */}
+            <button
+              type="button"
+              onClick={() => setActiveCategory(null)}
+              className={`shrink-0 w-44 h-36 rounded-3xl transition-all flex flex-col items-center justify-center p-3 shadow-md border border-transparent text-white cursor-pointer select-none ${
+                activeCategory === null
+                  ? 'bg-slate-800 ring-4 ring-primary scale-95 shadow-xl font-bold'
+                  : 'bg-slate-700 hover:-translate-y-1 hover:shadow-lg opacity-90 hover:opacity-100'
+              }`}
+            >
+              <div className="w-16 h-16 flex items-center justify-center mb-2 shrink-0">
+                <Package className="w-14 h-14 text-white drop-shadow-md" strokeWidth={1.75} />
+              </div>
+              <span className="font-black text-base md:text-lg tracking-wider text-center leading-tight line-clamp-1 w-full px-1">
+                الكل
+              </span>
+              <span className="font-bold text-xs opacity-85 tracking-wider text-center uppercase line-clamp-1 w-full px-1">
+                Tous
+              </span>
+            </button>
 
-        {/* Category filters - desktop (moved to top of caisse section) */}
-        <div className="hidden gap-2 pt-2 border-t border-border pb-2 lg:flex w-full overflow-x-auto">
-          <div className="flex w-full gap-2 px-1">
+            {/* Dynamic Category Buttons */}
             {dynamicCATEGORIES.map(cat => {
               const catData = dbCategories.find(c => c.key === cat.key);
+              const isActive = activeCategory === cat.key;
+              const customIcon = getCategoryCustomIcon(cat.key);
+              const IconComp = categoryIcons[cat.key] || Package;
+
               return (
                 <button
                   key={cat.key}
-                  onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
-                  className={`flex-1 aspect-square rounded-xl transition-all flex flex-col items-center justify-center p-1.5 shadow-sm border border-transparent text-white ${activeCategory === cat.key ? 'ring-4 ring-primary scale-[0.98]' : 'hover:-translate-y-0.5'}`}
+                  type="button"
+                  onClick={() => setActiveCategory(isActive ? null : cat.key)}
+                  className={`shrink-0 w-44 h-36 rounded-3xl transition-all flex flex-col items-center justify-center p-3 shadow-md border border-transparent text-white cursor-pointer select-none ${
+                    isActive
+                      ? 'ring-4 ring-primary scale-95 shadow-xl font-bold'
+                      : 'hover:-translate-y-1 hover:shadow-lg opacity-90 hover:opacity-100'
+                  }`}
                   style={{ backgroundColor: catData?.color || '#9DC6D8' }}
                 >
-                  <div className="font-black text-[13px] md:text-[15px] tracking-wider text-center leading-tight line-clamp-1">{cat.labelAr}</div>
-                  <span className="font-bold text-[8px] md:text-[9px] opacity-70 tracking-widest text-center uppercase mx-auto line-clamp-1">{cat.label}</span>
+                  <div className="w-16 h-16 flex items-center justify-center mb-2 shrink-0">
+                    {customIcon ? (
+                      <img src={customIcon} alt={cat.label} className="w-14 h-14 object-contain drop-shadow-md" />
+                    ) : (
+                      <IconComp className="w-14 h-14 text-white drop-shadow-md" strokeWidth={1.75} />
+                    )}
+                  </div>
+                  <span className="font-black text-base md:text-lg tracking-wider text-center leading-tight line-clamp-1 w-full px-1">
+                    {cat.labelAr || cat.label}
+                  </span>
+                  <span className="font-bold text-xs opacity-85 tracking-wider text-center uppercase line-clamp-1 w-full px-1">
+                    {cat.label}
+                  </span>
                 </button>
               );
             })}
@@ -1322,11 +1535,11 @@ export default function CaissePage() {
                 <div className="pt-4">
                   <Button
                     variant="ghost"
-                    className="w-full h-20 border-2 border-dashed border-gray-200 rounded-3xl flex items-center justify-center gap-4 text-gray-400 hover:text-primary hover:border-primary hover:bg-primary/5 transition-all"
+                    className="w-full h-20 border-2 border-dashed border-indigo-200 rounded-3xl flex items-center justify-center gap-4 text-indigo-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all"
                     onClick={handlePrintReceipt}
                   >
                     <Printer className="h-8 w-8" />
-                    <span className="text-xl font-black uppercase tracking-widest">Imprimer Ticket</span>
+                    <span className="text-xl font-black uppercase tracking-widest">Imprimer Facture A4</span>
                   </Button>
                 </div>
               </>
@@ -1388,11 +1601,11 @@ export default function CaissePage() {
                   </div>
                   <Button
                     variant="ghost"
-                    className="w-full h-16 border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center gap-3 text-gray-400 hover:text-primary hover:border-primary hover:bg-primary/5 transition-all mt-2"
+                    className="w-full h-16 border-2 border-dashed border-indigo-200 rounded-2xl flex items-center justify-center gap-3 text-indigo-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all mt-2"
                     onClick={handlePrintReceipt}
                   >
                     <Printer className="h-6 w-6" />
-                    <span className="text-lg font-black uppercase tracking-widest">Imprimer Ticket</span>
+                    <span className="text-lg font-black uppercase tracking-widest">Imprimer Facture A4</span>
                   </Button>
                 </div>
               </div>
@@ -1876,79 +2089,285 @@ export default function CaissePage() {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Facture Preview Modal */}
       <Dialog open={showReceiptModal} onOpenChange={setShowReceiptModal}>
-        <DialogContent className="sm:max-w-[400px] bg-gray-100 p-0 overflow-hidden border-0">
-          <div className="bg-white mx-auto my-6 p-6 shadow-lg min-h-[500px] w-[350px] font-mono text-black relative flex flex-col">
-            <div className="text-center mb-4">
-              <h2 className="text-2xl font-black">BK MODE</h2>
-              <p className="text-xs uppercase tracking-widest mt-1">Ticket d'achat</p>
+        <DialogContent className="sm:max-w-2xl bg-gray-50 p-0 overflow-hidden border-0 rounded-2xl">
+          {/* Preview header */}
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+              <Printer className="h-5 w-5 text-indigo-600" />
             </div>
-            
-            <div className="border-b border-dashed border-black my-3" />
-
-            <div className="text-[10px] space-y-0.5">
-              <p>Date: {new Date().toLocaleString('fr-FR')}</p>
-              <p>Ticket ID: {currentSaleId.toUpperCase()}</p>
-              <p>Vendeur: {user?.username || 'Admin'}</p>
-              {clientName && <p className="font-bold mt-1">Client: {clientName}</p>}
+            <div>
+              <h3 className="text-lg font-black text-gray-900">Aperçu Facture A4</h3>
+              <p className="text-xs text-gray-500 font-medium">Format professionnel — Prêt à imprimer</p>
             </div>
-
-            <div className="border-b border-dashed border-black my-3" />
-
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-black text-left">
-                  <th className="pb-1">Art.</th>
-                  <th className="pb-1 text-center">Qté</th>
-                  <th className="pb-1 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {cart.map((item, i) => (
-                  <tr key={i}>
-                    <td className="py-1 line-clamp-1">{item.product.name} {item.size ? `(${item.size})` : ''}</td>
-                    <td className="py-1 text-center">{item.quantity}</td>
-                    <td className="py-1 text-right">{formatDZD(item.subtotal)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="border-b border-dashed border-black my-3" />
-
-            <div className="text-right text-xs space-y-1">
-              <p>Sous-total: {formatDZD(subtotal)}</p>
-              {reduction > 0 && <p>Réduction: -{formatDZD(reduction)}</p>}
-              <div className="flex justify-between items-center text-lg font-black pt-2 border-t border-black mt-2">
-                <span>TOTAL:</span>
-                <span>{formatDZD(total)}</span>
-              </div>
-              {showCreditDetails && (
-                <div className="mt-2 pt-2 border-t border-gray-200">
-                  <div className="flex justify-between font-bold">
-                    <span>Payé:</span>
-                    <span>{formatDZD(Number(paidNow) || 0)}</span>
-                  </div>
-                  <div className="flex justify-between font-black text-red-600 mt-1">
-                    <span>Reste (Crédit):</span>
-                    <span>{formatDZD(Math.max(0, total - (Number(paidNow) || 0)))}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-auto pt-6 text-center text-[10px] space-y-1">
-              <div className="font-bold text-[11px]">Les retours et échanges sont acceptés sous 3 jours</div>
-              <div className="font-bold text-xs" dir="rtl">الاسترجاع والاستبدال مقبول خلال 3 أيام</div>
-              <div className="text-[10px] italic mt-1">Merci pour votre visite !</div>
+            <div className="ml-auto">
+              <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                showCreditDetails ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {showCreditDetails ? 'Crédit' : 'Cash'}
+              </span>
             </div>
           </div>
 
-          <div className="bg-white p-4 border-t border-gray-200 flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => setShowReceiptModal(false)}>Annuler</Button>
-            <Button className="flex-1 bg-black hover:bg-gray-800 text-white" onClick={executePrint}>
-              <Printer className="h-4 w-4 mr-2" />
-              Confirmer & Imprimer
+          {/* Invoice Preview */}
+          <div className="p-5 overflow-y-auto max-h-[60vh]">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 font-sans text-gray-900">
+              {/* Invoice header */}
+              <div className="flex justify-between items-start pb-5 border-b-2 border-gray-900 mb-6">
+                <div>
+                  <h2 className="text-3xl font-black tracking-tight">LUXEDOR_</h2>
+                  <p className="text-xs tracking-[3px] uppercase text-gray-400 mt-1">MEUBLES & DECO</p>
+                  <p className="text-xs text-gray-400 mt-2 leading-relaxed">Tél: 0549 10 64 78<br />Adresse: OuledHeddaj, Boumerdes</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs tracking-widest uppercase text-gray-400">Facture de vente</p>
+                  <p className="text-2xl font-black text-indigo-600 mt-1">#{currentSaleId.toUpperCase()}</p>
+                  <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                  <p className="text-xs text-gray-500">Caissier: <strong>{user?.username || 'Admin'}</strong></p>
+                  <span className={`inline-block mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    showCreditDetails ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {showCreditDetails ? 'Crédit' : 'Vente Directe'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Meta row */}
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Vendeur</p>
+                  <p className="text-sm font-semibold">LUXEDOR_</p>
+                  <p className="text-xs text-indigo-500">{new Date().toLocaleTimeString('fr-FR')}</p>
+                </div>
+                <div
+                  className="bg-gray-50 rounded-xl p-3 border border-gray-100 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40 transition-all group relative"
+                  onClick={() => {
+                    if (!editingClientInModal) {
+                      setTempClientName(clientName);
+                      setEditingClientInModal(true);
+                    }
+                  }}
+                  title="Cliquer pour modifier le client"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Client</p>
+                    {!editingClientInModal && (
+                      <span className="text-[9px] text-indigo-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">✏ Modifier</span>
+                    )}
+                  </div>
+                  {editingClientInModal ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={tempClientName}
+                      onChange={e => setTempClientName(e.target.value)}
+                      onBlur={() => {
+                        setClientName(tempClientName);
+                        setEditingClientInModal(false);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          setClientName(tempClientName);
+                          setEditingClientInModal(false);
+                        }
+                        if (e.key === 'Escape') {
+                          setEditingClientInModal(false);
+                        }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full text-sm font-bold bg-white border border-indigo-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-400 text-gray-900 placeholder-gray-300"
+                      placeholder="Nom du client..."
+                    />
+                  ) : clientName ? (
+                    <>
+                      <p className="text-sm font-bold text-gray-900">{clientName}</p>
+                      {clientPhone && <p className="text-xs text-gray-500">{clientPhone}</p>}
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-300 italic">Client de passage</p>
+                  )}
+                </div>
+                <div
+                  className={`bg-gray-50 rounded-xl p-3 border border-gray-100 relative group ${!showCreditDetails ? 'cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40' : ''} transition-all`}
+                  onClick={() => {
+                    if (!showCreditDetails && !editingPaymentInModal) {
+                      setEditingPaymentInModal(true);
+                    }
+                  }}
+                  title={!showCreditDetails ? "Cliquer pour modifier le mode de paiement" : undefined}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Paiement</p>
+                    {!showCreditDetails && !editingPaymentInModal && (
+                      <span className="text-[9px] text-indigo-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">✏ Modifier</span>
+                    )}
+                  </div>
+                  {showCreditDetails ? (
+                    <>
+                      <p className="text-sm font-bold text-amber-700">Crédit client</p>
+                      <p className="text-xs text-amber-600">Versé: {formatDZD(Number(paidNow) || 0)}</p>
+                    </>
+                  ) : editingPaymentInModal ? (
+                    <div className="space-y-1.5" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoicePaymentMethod('cash');
+                            setEditingPaymentInModal(false);
+                          }}
+                          className={`flex-1 text-xs font-bold py-1 px-2 rounded-lg transition-all ${
+                            invoicePaymentMethod === 'cash'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50 hover:border-indigo-300'
+                          }`}
+                        >
+                          Cash
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoicePaymentMethod('cheque');
+                            setEditingPaymentInModal(false);
+                          }}
+                          className={`flex-1 text-xs font-bold py-1 px-2 rounded-lg transition-all ${
+                            invoicePaymentMethod === 'cheque'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50 hover:border-indigo-300'
+                          }`}
+                        >
+                          Chèque
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-bold text-gray-900">
+                      {invoicePaymentMethod === 'cheque' ? 'Chèque' : 'Cash'}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Items table */}
+              <table className="w-full text-sm mb-5">
+                <thead>
+                  <tr className="bg-gray-900 text-white">
+                    <th className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider rounded-tl-lg" style={{width:'45%'}}>Désignation</th>
+                    <th className="px-3 py-2.5 text-center text-[10px] font-black uppercase tracking-wider">Qté</th>
+                    <th className="px-3 py-2.5 text-right text-[10px] font-black uppercase tracking-wider">Prix Unit.</th>
+                    <th className="px-3 py-2.5 text-right text-[10px] font-black uppercase tracking-wider rounded-tr-lg">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {cart.map((item, i) => {
+                    const unitPrice = item.customUnitPrice ?? item.product.priceSale;
+                    return (
+                      <tr key={i} className={i % 2 === 1 ? 'bg-gray-50/50' : ''}>
+                        <td className="px-3 py-2">
+                          <p className="font-semibold text-gray-900">{item.product.name}{item.size ? <span className="ml-1 text-indigo-500 text-xs">({item.size})</span> : null}</p>
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-600">{item.weightKg ?? item.quantity}</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{formatDZD(unitPrice)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-gray-900">{formatDZD(item.subtotal)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Totals */}
+              <div className="flex justify-end mb-5">
+                <div className="w-64 space-y-1.5">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Sous-total</span>
+                    <span className="font-semibold">{formatDZD(subtotal)}</span>
+                  </div>
+                  {reduction > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Remise</span>
+                      <span className="font-semibold text-red-500">- {formatDZD(reduction)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-3 border-t-2 border-gray-900">
+                    <span className="text-base font-black">Total TTC</span>
+                    <span className="text-xl font-black text-indigo-600">{formatDZD(total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Credit payment breakdown */}
+              {showCreditDetails && (
+                <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200 mb-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-3">Détail du paiement crédit</p>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-gray-600">Total facture</span><span className="font-semibold">{formatDZD(total)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">Versement initial</span><span className="font-semibold text-emerald-600">{formatDZD(Number(paidNow) || 0)}</span></div>
+                    <div className="flex justify-between pt-2 border-t border-indigo-200">
+                      <span className="font-black text-gray-800">Reste (Crédit)</span>
+                      <span className="font-black text-red-600 text-base">{formatDZD(Math.max(0, total - (Number(paidNow) || 0)))}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="border-t border-gray-100 pt-4 flex justify-between items-end gap-4">
+                <div
+                  className="min-w-0 flex-1 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 p-3 text-xs leading-relaxed text-gray-500 transition-colors hover:border-indigo-400 hover:bg-indigo-50 cursor-text"
+                  onClick={() => setEditingInvoiceNote(true)}
+                >
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <strong className="text-gray-700">Note / conditions</strong>
+                    {!editingInvoiceNote && <span className="text-[10px] font-bold text-indigo-500">Cliquer pour modifier</span>}
+                  </div>
+                  {editingInvoiceNote ? (
+                    <textarea
+                      autoFocus
+                      value={invoiceNote}
+                      onChange={event => setInvoiceNote(event.target.value)}
+                      onBlur={() => setEditingInvoiceNote(false)}
+                      onClick={event => event.stopPropagation()}
+                      className="min-h-20 w-full resize-y rounded-md border border-indigo-300 bg-white px-2 py-1.5 text-xs leading-relaxed text-gray-700 outline-none ring-indigo-300 focus:ring-2"
+                      placeholder="Écrivez les conditions pour ce client..."
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{invoiceNote.trim() || "Aucune condition particulière."}</p>
+                  )}
+                </div>
+
+                <div className="border-2 border-dashed border-gray-200 rounded-lg p-3 text-xs text-gray-300 text-center min-w-[100px]">
+                  Cachet<br /><br />
+                </div>
+              </div>
+
+              {/* QR Codes centered at bottom of document */}
+              <div className="mt-4 pt-4 border-t border-gray-100 flex justify-center gap-6 items-center">
+                <div className="text-center bg-gray-50 border border-gray-100 p-3 rounded-xl">
+                  <img src={INVOICE_QR_CODES.instagram} alt="Instagram QR" className="w-24 h-24 mx-auto mb-1.5 block" />
+                  <p className="text-[10px] font-black text-pink-600">@luxedor_</p>
+                </div>
+                <div className="text-center bg-gray-50 border border-gray-100 p-3 rounded-xl">
+                  <img src={INVOICE_QR_CODES.viber} alt="Viber QR" className="w-24 h-24 mx-auto mb-1.5 block" />
+                  <p className="text-[10px] font-black text-purple-600">Viber</p>
+                </div>
+                <div className="text-center bg-gray-50 border border-gray-100 p-3 rounded-xl">
+                  <img src={INVOICE_QR_CODES.location} alt="Maps QR" className="w-24 h-24 mx-auto mb-1.5 block" />
+                  <p className="text-[10px] font-black text-red-600">Location</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="bg-white border-t border-gray-200 px-6 py-4 flex gap-3">
+            <Button variant="outline" className="flex-1 h-12 rounded-xl font-bold text-gray-500" onClick={() => setShowReceiptModal(false)}>Annuler</Button>
+            <Button
+              className="flex-[2] h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black gap-2 shadow-lg shadow-indigo-200 transition-all hover:-translate-y-0.5"
+              onClick={executePrint}
+            >
+              <Printer className="h-5 w-5" />
+              Imprimer Facture A4
             </Button>
           </div>
         </DialogContent>

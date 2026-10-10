@@ -424,23 +424,27 @@ export async function initDb() {
                     await database.execute("ALTER TABLE payments ADD COLUMN addedBy TEXT");
                 } catch (e) { /* ignore if already exists */ }
 
-                await migrateLegacyDatabase(database);
-                await normalizeStoredProductBarcodes(database);
-
-                // Seed default categories if table is empty
+                // Ensure categories table contains only the 3 target default categories (Salon, Les Tables, Décoration)
                 try {
-                    const catCount = await getTableCount(database, "categories");
-                    if (catCount === 0) {
-                        for (const cat of DEFAULT_CATEGORIES) {
-                            await runExecute(
-                                database,
-                                "INSERT OR IGNORE INTO categories (id, key, label, labelAr, color, hoverColor, icon, customIcon, hasVentePersonnalisee, hasTailles, hasPointure, sortOrder) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-                                [cat.id, cat.key, cat.label, cat.labelAr, cat.color, cat.hoverColor, cat.icon, cat.customIcon || null, cat.hasVentePersonnalisee ? 1 : 0, cat.hasTailles ? 1 : 0, cat.hasPointure ? 1 : 0, cat.sortOrder]
-                            );
-                        }
+                    const validKeys = DEFAULT_CATEGORIES.map(c => c.key);
+                    await database.execute(
+                        `DELETE FROM categories WHERE key NOT IN ('${validKeys.join("','")}')`
+                    );
+
+                    for (const cat of DEFAULT_CATEGORIES) {
+                        await runExecute(
+                            database,
+                            "INSERT OR REPLACE INTO categories (id, key, label, labelAr, color, hoverColor, icon, customIcon, hasVentePersonnalisee, hasTailles, hasPointure, sortOrder) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                            [cat.id, cat.key, cat.label, cat.labelAr, cat.color, cat.hoverColor, cat.icon, cat.customIcon || null, cat.hasVentePersonnalisee ? 1 : 0, cat.hasTailles ? 1 : 0, cat.hasPointure ? 1 : 0, cat.sortOrder]
+                        );
                     }
+
+                    // Update products with obsolete categories to 'les_tables'
+                    await database.execute(
+                        `UPDATE products SET category = 'les_tables' WHERE category NOT IN ('${validKeys.join("','")}')`
+                    );
                 } catch (e) {
-                    console.error("Error seeding default categories:", e);
+                    console.error("Error migrating default categories:", e);
                 }
 
                 return database;

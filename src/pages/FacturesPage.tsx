@@ -25,14 +25,9 @@ import {
 } from "@/lib/thermalBarcode";
 
 const categoryColorsFallback: Record<string, string> = {
-  hauts: "bg-blue-50 text-blue-600 border-blue-100",
-  pantalons: "bg-emerald-50 text-emerald-600 border-emerald-100",
-  chaussures: "bg-indigo-50 text-indigo-600 border-indigo-100",
-  accessoires: "bg-amber-50 text-amber-600 border-amber-100",
-  parfums: "bg-rose-50 text-rose-600 border-rose-100",
-  sport: "bg-orange-50 text-orange-600 border-orange-100",
-  sousvetements: "bg-slate-50 text-slate-600 border-slate-100",
-  vestes: "bg-cyan-50 text-cyan-600 border-cyan-100",
+  salon: "bg-cyan-50 text-cyan-600 border-cyan-100",
+  les_tables: "bg-slate-50 text-slate-600 border-slate-100",
+  decoration: "bg-purple-50 text-purple-600 border-purple-100",
 };
 
 
@@ -151,7 +146,7 @@ export default function FacturesPage() {
   const [dateFilter, setDateFilter] = useState("");
   const [view, setView] = useState<View>(getInitialFacturesView);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [activeCategory, setActiveCategory] = useState<CategoryType | null>("hauts");
+  const [activeCategory, setActiveCategory] = useState<CategoryType | null>("salon");
   const [mobileSection, setMobileSection] = useState<"products" | "cart">("products");
 
   // Barcode Preview Modal State
@@ -183,7 +178,7 @@ export default function FacturesPage() {
   const [itemQty, setItemQty] = useState<number | "">("");
   const [itemBuy, setItemBuy] = useState<number | "">("");
   const [itemSale, setItemSale] = useState<number | "">("");
-  const [itemCategory, setItemCategory] = useState<CategoryType>("hauts");
+  const [itemCategory, setItemCategory] = useState<CategoryType>("salon");
   const [itemBarcode, setItemBarcode] = useState("");
   const SHIRT_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
   const SHOE_SIZES = ["28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48"];
@@ -340,7 +335,7 @@ export default function FacturesPage() {
     setItemQty("");
     setItemBuy("");
     setItemSale("");
-    setItemCategory("hauts");
+    setItemCategory("salon");
     setSelectedProduct(null);
     setItemBarcode("");
     setSizeQtys({});
